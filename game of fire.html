@@ -1,0 +1,443 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Battle Ground</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#304c35;color:white;font-family:Arial}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;inset:12px;pointer-events:none}
+.panel{background:#09131ddd;border:1px solid #ffffff44;border-radius:12px;padding:12px}
+#stats{position:absolute;top:0;left:0}
+#right{position:absolute;top:0;right:0;text-align:right}
+#bottom{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:end;gap:8px}
+#health{width:170px;height:9px;background:#633;border-radius:9px;overflow:hidden;margin-top:8px}
+#bar{height:100%;width:100%;background:#8dff69}
+button,select{padding:11px;border:1px solid #ffffff55;border-radius:9px;background:#172820;color:white;cursor:pointer}
+button:hover{border-color:#caff48}
+#fire{background:#caff48;color:#10190a;font-weight:bold}
+#message{position:fixed;top:42%;width:100%;text-align:center;font-size:clamp(24px,5vw,44px);font-weight:bold;text-shadow:0 2px 10px black;pointer-events:none}
+#menu{position:fixed;inset:0;display:grid;place-items:center;background:#06100edb;padding:16px}
+#box{width:min(470px,100%);padding:24px;border:1px solid #caff48;border-radius:18px;background:#102019}
+h1{color:#caff48;font-size:42px;margin:10px 0}
+p{line-height:1.5;color:#d5dfd6;font-size:14px}
+label{display:block;margin-top:12px;font-size:13px}
+select{width:100%;margin-top:7px}
+#start{width:100%;margin-top:18px;background:#caff48;color:#10190a;font-weight:bold}
+#mobile{position:fixed;bottom:110px;left:12px;display:none;gap:5px}
+#mobile button{width:44px;height:44px;background:#101b20cc}
+#reload{font-size:22px;color:#caff48}
+@media(max-width:650px){
+ #mobile{display:flex;flex-direction:column}
+ #bottom{align-items:end}
+ #bottom .panel{max-width:48%;font-size:12px}
+ #health{width:115px}
+ #bottom button{padding:8px}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+ <div class="panel" id="stats">
+  <b style="color:#caff48">⚡ BATTLE GROUND</b><br><br>
+  Health: <span id="hp">100</span>
+  <div id="health"><div id="bar"></div></div>
+  <small>Ammo: <b id="ammo">30</b> / <span id="reserve">120</span></small>
+ </div>
+ <div class="panel" id="right">
+  ALIVE: <b id="alive">50</b><br>
+  KILLS: <b id="kills">0</b><br>
+  <small id="gun">RANGER AR</small>
+ </div>
+ <div id="bottom">
+  <div class="panel">
+   <b>CONTROLS</b><br>
+   <small>WASD: Move<br>Mouse: Aim<br>Click: Shoot<br>R: Reload · E: Car</small>
+  </div>
+  <div>
+   <button id="reload">↻</button>
+   <button id="fire">SHOOT</button>
+   <button id="car">🚙 CAR</button>
+  </div>
+ </div>
+</div>
+
+<div id="message">READY TO DROP</div>
+
+<div id="mobile">
+ <button data-key="w">▲</button>
+ <div><button data-key="a">◀</button>
+ <button data-key="s">▼</button>
+ <button data-key="d">▶</button></div>
+</div>
+
+<div id="menu">
+ <div id="box">
+  <small style="color:#caff48;letter-spacing:3px">SURVIVAL PROTOCOL</small>
+  <h1>BATTLE<br>GROUND</h1>
+  <p>Enter the arena, eliminate enemy bots, collect ammo and medkits, and survive. Choose your character costume and loadout.</p>
+  <label>Number of players</label>
+  <select id="count">
+   <option value="49">50 total combatants</option>
+   <option value="34">35 total combatants</option>
+   <option value="19">20 total combatants</option>
+   <option value="9">10 total combatants</option>
+  </select>
+  <label>Character costume</label>
+  <select id="costume">
+   <option value="#37d9ff">Frost Runner — Blue</option>
+   <option value="#f4c542">Gold Phantom — Gold</option>
+   <option value="#ff526d">Crimson Ops — Red</option>
+   <option value="#b5ff52">Jungle Ranger — Green</option>
+  </select>
+  <label>Starting weapon</label>
+  <select id="weapon">
+   <option value="ar">Assault Rifle</option>
+   <option value="smg">Rapid SMG</option>
+  </select>
+  <button id="start">▶ START GAME</button>
+  <p><small>Single-player prototype with AI bots. Online multiplayer requires a server.</small></p>
+ </div>
+</div>
+
+<script>
+const canvas=document.querySelector("#game");
+const ctx=canvas.getContext("2d");
+const $=id=>document.getElementById(id);
+let W,H,scale=1;
+
+function resize(){
+ W=innerWidth;H=innerHeight;
+ scale=Math.min(devicePixelRatio||1,2);
+ canvas.width=W*scale;canvas.height=H*scale;
+ canvas.style.width=W+"px";canvas.style.height=H+"px";
+ ctx.setTransform(scale,0,0,scale,0,0);
+}
+addEventListener("resize",resize);resize();
+
+const world={w:2200,h:1800};
+const keys={};
+const mouse={x:W/2,y:H/2,down:false};
+const weapons={
+ ar:{name:"ASSAULT RIFLE",mag:30,ammo:30,reserve:120,
+ damage:25,rate:170,reload:1200},
+ smg:{name:"RAPID SMG",mag:36,ammo:36,reserve:144,
+ damage:15,rate:85,reload:1000}
+};
+
+let player,bots=[],bullets=[],trees=[],cars=[],loot=[];
+let active=false,kills=0,weapon="ar",lastShot=0;
+let reloading=false,driving=false,carObject=null;
+let particles=[],time=0;
+
+function random(a,b){return a+Math.random()*(b-a)}
+function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
+function say(text){$("message").textContent=text}
+
+function startGame(){
+ const amount=Number($("count").value);
+ player={
+  x:world.w/2,y:world.h/2,r:15,
+  hp:100,max:100,speed:230,
+  color:$("costume").value,angle:0
+ };
+ bots=[];bullets=[];trees=[];cars=[];loot=[];particles=[];
+ kills=0;time=0;driving=false;carObject=null;
+ weapon=$("weapon").value;
+ weapons[weapon].ammo=weapons[weapon].mag;
+ weapons[weapon].reserve=weapon==="ar"?120:144;
+ reloading=false;
+
+ for(let i=0;i<amount;i++){
+  let x,y;
+  do{x=random(60,2140);y=random(60,1740)}
+  while(distance({x,y},player)<260);
+  bots.push({
+   x,y,r:13,hp:100,max:100,
+   color:["#ff596e","#f6c94b","#ad83ff","#7ee787"][i%4],
+   angle:0,speed:random(55,95),
+   cooldown:random(.5,2),alive:true,
+   name:"BOT-"+(i+1)
+  });
+ }
+ for(let i=0;i<120;i++)
+  trees.push({x:random(20,2180),y:random(20,1780),r:random(12,25)});
+ for(let i=0;i<7;i++)
+  cars.push({x:random(120,2080),y:random(120,1680),
+  angle:random(0,6.28),color:["#dfc34a","#d95050","#438dc4"][i%3]});
+ for(let i=0;i<32;i++)
+  loot.push({x:random(40,2160),y:random(40,1760),
+  type:Math.random()<.6?"ammo":"med",taken:false});
+
+ $("menu").style.display="none";
+ $("gun").textContent=weapons[weapon].name;
+ $("ammo").textContent=weapons[weapon].ammo;
+ $("reserve").textContent=weapons[weapon].reserve;
+ $("hp").textContent=100;$("bar").style.width="100%";
+ $("kills").textContent=0;
+ active=true;say("FIGHT!");
+ setTimeout(()=>{if(active)say("")},1800);
+}
+$("start").onclick=startGame;
+
+addEventListener("keydown",e=>{
+ keys[e.key.toLowerCase()]=true;
+ if(e.key.toLowerCase()==="r")reload();
+ if(e.key.toLowerCase()==="e")toggleCar();
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+canvas.addEventListener("mousemove",e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+canvas.addEventListener("mousedown",e=>{if(e.button===0)mouse.down=true});
+addEventListener("mouseup",()=>mouse.down=false);
+$("fire").onpointerdown=e=>{e.preventDefault();mouse.down=true};
+$("fire").onpointerup=()=>mouse.down=false;
+$("fire").onpointerleave=()=>mouse.down=false;
+document.querySelectorAll("[data-key]").forEach(b=>{
+ const k=b.dataset.key;
+ b.onpointerdown=e=>{e.preventDefault();keys[k]=true};
+ b.onpointerup=()=>keys[k]=false;
+ b.onpointerleave=()=>keys[k]=false;
+});
+$("reload").onclick=reload;
+$("car").onclick=toggleCar;
+
+function reload(){
+ if(!active||reloading)return;
+ const w=weapons[weapon];
+ if(w.ammo===w.mag||w.reserve<=0)return;
+ reloading=true;say("RELOADING...");
+ setTimeout(()=>{
+  if(!active)return;
+  const amount=Math.min(w.mag-w.ammo,w.reserve);
+  w.ammo+=amount;w.reserve-=amount;
+  $("ammo").textContent=w.ammo;
+  $("reserve").textContent=w.reserve;
+  reloading=false;say("");
+ },w.reload);
+}
+
+function toggleCar(){
+ if(!active)return;
+ if(driving){
+  driving=false;carObject=null;player.speed=230;say("ON FOOT");return;
+ }
+ let nearest=cars.filter(c=>!c.used).sort((a,b)=>
+  distance(a,player)-distance(b,player))[0];
+ if(nearest&&distance(nearest,player)<100){
+  carObject=nearest;nearest.used=true;driving=true;player.speed=390;
+  say("VEHICLE ENTERED");
+  setTimeout(()=>{if(active)say("")},1000);
+ }else{
+  say("MOVE CLOSER TO A CAR");
+  setTimeout(()=>{if(active)say("")},1000);
+ }
+}
+
+function shoot(owner,angle,enemy=false){
+ const w=weapons[weapon];
+ if(!enemy){
+  if(reloading)return;
+  if(w.ammo<=0){reload();return}
+  w.ammo--;$("ammo").textContent=w.ammo;
+ }
+ const a=angle+random(enemy?-.14:-.025,enemy?.14:.025);
+ bullets.push({
+  x:owner.x+Math.cos(a)*20,y:owner.y+Math.sin(a)*20,
+  vx:Math.cos(a)*(enemy?7:12),vy:Math.sin(a)*(enemy?7:12),
+  owner,enemy,damage:enemy?8:w.damage,life:1.5
+ });
+ for(let i=0;i<4;i++)
+  particles.push({x:owner.x,y:owner.y,vx:random(-90,90),
+  vy:random(-90,90),life:.2,color:"#ffd777"});
+}
+
+function damage(target,amount,byPlayer){
+ target.hp-=amount;
+ if(target===player){
+  $("hp").textContent=Math.max(0,Math.ceil(player.hp));
+  $("bar").style.width=clamp(player.hp,0,100)+"%";
+  if(player.hp<=0)endGame(false);
+ }else if(target.hp<=0&&target.alive){
+  target.alive=false;
+  if(byPlayer){kills++;$("kills").textContent=kills;say("ELIMINATION!")}
+ }
+}
+
+function endGame(win){
+ active=false;driving=false;
+ $("menu").style.display="grid";
+ $("box").querySelector("h1").innerHTML=win?"CHAMPION!":"GAME OVER";
+ $("box").querySelector("p").textContent=
+  (win?"You survived the arena! ":"You were eliminated. ")+
+  "Total eliminations: "+kills+". Start another match?";
+ $("start").textContent="↻ PLAY AGAIN";
+}
+
+function camera(){
+ return {x:clamp(player.x-W/2,0,world.w-W),
+ y:clamp(player.y-H/2,0,world.h-H)};
+}
+
+function update(dt){
+ if(!active)return;
+ time+=dt;
+ let dx=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0);
+ let dy=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);
+ const length=Math.hypot(dx,dy)||1;
+ player.x=clamp(player.x+dx/length*player.speed*dt,20,world.w-20);
+ player.y=clamp(player.y+dy/length*player.speed*dt,20,world.h-20);
+ if(driving&&carObject){carObject.x=player.x;carObject.y=player.y}
+ const cam=camera();
+ player.angle=Math.atan2(mouse.y+cam.y-player.y,mouse.x+cam.x-player.x);
+ if(mouse.down&&performance.now()-lastShot>weapons[weapon].rate){
+  shoot(player,player.angle);lastShot=performance.now();
+ }
+ bots.forEach(b=>{
+  if(!b.alive)return;
+  let target=player,near=distance(b,player);
+  bots.forEach(other=>{
+   if(other!==b&&other.alive){
+    const d=distance(b,other);
+    if(d<near&&d<300){near=d;target=other}
+   }
+  });
+  const a=Math.atan2(target.y-b.y,target.x-b.x);b.angle=a;
+  if(near>130){b.x+=Math.cos(a)*b.speed*dt;b.y+=Math.sin(a)*b.speed*dt}
+  if(near<65){b.x-=Math.cos(a)*b.speed*.5*dt;b.y-=Math.sin(a)*b.speed*.5*dt}
+  b.cooldown-=dt;
+  if(near<380&&b.cooldown<=0){
+   shoot(b,a,true);b.cooldown=random(.7,1.8);
+  }
+  b.x=clamp(b.x,15,world.w-15);b.y=clamp(b.y,15,world.h-15);
+ });
+ for(let i=bullets.length-1;i>=0;i--){
+  const b=bullets[i];b.x+=b.vx*60*dt;b.y+=b.vy*60*dt;b.life-=dt;
+  let remove=b.life<=0||b.x<0||b.y<0||b.x>world.w||b.y>world.h;
+  if(!remove&&b.enemy){
+   if(distance(b,player)<player.r+4){damage(player,b.damage,false);remove=true}
+   else for(const t of bots){
+    if(t.alive&&t!==b.owner&&distance(b,t)<t.r+3){
+     damage(t,b.damage,false);remove=true;break;
+    }
+   }
+  }else if(!remove){
+   for(const t of bots){
+    if(t.alive&&distance(b,t)<t.r+4){
+     damage(t,b.damage,true);remove=true;break;
+    }
+   }
+  }
+  if(remove)bullets.splice(i,1);
+ }
+ particles.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt});
+ particles=particles.filter(p=>p.life>0);
+ loot.forEach(l=>{
+  if(l.taken||distance(l,player)>25)return;
+  l.taken=true;
+  if(l.type==="ammo"){
+   weapons[weapon].reserve+=24;
+   $("reserve").textContent=weapons[weapon].reserve;
+  }else{
+   player.hp=Math.min(100,player.hp+25);
+   $("hp").textContent=Math.ceil(player.hp);
+   $("bar").style.width=player.hp+"%";
+  }
+ });
+ $("alive").textContent=bots.filter(b=>b.alive).length+(player.hp>0?1:0);
+ if(player.hp>0&&bots.every(b=>!b.alive))endGame(true);
+}
+
+function drawActor(a,cam,isPlayer=false){
+ const x=a.x-cam.x,y=a.y-cam.y;
+ ctx.save();ctx.translate(x,y);ctx.rotate(a.angle);
+ ctx.fillStyle="#0006";ctx.beginPath();ctx.ellipse(2,5,a.r+5,a.r+3,0,0,7);ctx.fill();
+ ctx.fillStyle=a.color;ctx.beginPath();ctx.arc(0,0,a.r,0,7);ctx.fill();
+ ctx.fillStyle="#edc39b";ctx.beginPath();ctx.arc(5,-3,7,0,7);ctx.fill();
+ ctx.fillStyle="#182326";ctx.fillRect(8,-4,25,8);
+ ctx.fillStyle="#89979a";ctx.fillRect(19,-2,17,4);
+ ctx.restore();
+ if(!isPlayer){
+  ctx.fillStyle="#111";ctx.fillRect(x-15,y-a.r-11,30,4);
+  ctx.fillStyle=a.hp>40?"#7eff72":"#ff4b57";
+  ctx.fillRect(x-15,y-a.r-11,30*clamp(a.hp/100,0,1),4);
+ }
+}
+
+function render(){
+ ctx.clearRect(0,0,W,H);
+ ctx.fillStyle="#3b6040";ctx.fillRect(0,0,W,H);
+ if(!player)return;
+ const cam=camera();
+ ctx.save();ctx.translate(-cam.x,-cam.y);
+ // Ground texture
+ for(let x=0;x<world.w;x+=100)for(let y=0;y<world.h;y+=100){
+  if((x+y)%200===0){ctx.fillStyle="#ffffff08";ctx.fillRect(x,y,95,95)}
+ }
+ // Dirt road
+ ctx.strokeStyle="#9b9870";ctx.lineWidth=90;ctx.beginPath();
+ ctx.moveTo(0,420);ctx.bezierCurveTo(500,450,650,900,1150,820);
+ ctx.bezierCurveTo(1550,760,1750,400,2200,500);ctx.stroke();
+ // Trees
+ trees.forEach(t=>{
+  ctx.fillStyle="#203e29";ctx.beginPath();ctx.arc(t.x+3,t.y+5,t.r+2,0,7);ctx.fill();
+  ctx.fillStyle="#367344";ctx.beginPath();ctx.arc(t.x,t.y,t.r,0,7);ctx.fill();
+  ctx.fillStyle="#4d8b4b";ctx.beginPath();ctx.arc(t.x-5,t.y-5,t.r*.5,0,7);ctx.fill();
+ });
+ // Cars
+ cars.forEach(c=>{
+  ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.angle);
+  ctx.fillStyle="#101616";ctx.fillRect(-26,-17,52,34);
+  ctx.fillStyle=c.color;ctx.fillRect(-25,-14,50,28);
+  ctx.fillStyle="#253f49";ctx.fillRect(-10,-11,21,22);
+  ctx.fillStyle="#111";ctx.fillRect(-18,-20,10,6);ctx.fillRect(9,-20,10,6);
+  ctx.fillRect(-18,14,10,6);ctx.fillRect(9,14,10,6);
+  ctx.restore();
+ });
+ // Loot
+ loot.forEach(l=>{
+  if(l.taken)return;
+  ctx.fillStyle=l.type==="ammo"?"#ffdc50":"#ff6d7a";
+  ctx.fillRect(l.x-7,l.y-7,14,14);
+  ctx.strokeStyle="#fff";ctx.strokeRect(l.x-7,l.y-7,14,14);
+ });
+ ctx.restore();
+ bots.forEach(b=>{if(b.alive)drawActor(b,cam)});
+ drawActor(player,cam,true);
+ ctx.save();ctx.translate(-cam.x,-cam.y);
+ bullets.forEach(b=>{
+  ctx.strokeStyle=b.enemy?"#ff6a70":"#ffe187";
+  ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(b.x,b.y);
+  ctx.lineTo(b.x-b.vx*1.5,b.y-b.vy*1.5);ctx.stroke();
+ });
+ particles.forEach(p=>{
+  ctx.globalAlpha=clamp(p.life*4,0,1);ctx.fillStyle=p.color;
+  ctx.fillRect(p.x,p.y,3,3);
+ });
+ ctx.globalAlpha=1;ctx.restore();
+ // Crosshair
+ if(active){
+  ctx.strokeStyle="#fff";ctx.lineWidth=1.5;ctx.beginPath();
+  ctx.arc(mouse.x,mouse.y,8,0,7);
+  ctx.moveTo(mouse.x-14,mouse.y);ctx.lineTo(mouse.x-5,mouse.y);
+  ctx.moveTo(mouse.x+5,mouse.y);ctx.lineTo(mouse.x+14,mouse.y);
+  ctx.moveTo(mouse.x,mouse.y-14);ctx.lineTo(mouse.x,mouse.y-5);
+  ctx.moveTo(mouse.x,mouse.y+5);ctx.lineTo(mouse.x,mouse.y+14);
+  ctx.stroke();
+ }
+}
+
+let previous=0;
+function loop(t){
+ const dt=Math.min((t-previous)/1000||0,.035);
+ previous=t;update(dt);render();requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
